@@ -152,7 +152,86 @@ namespace sm {
 
     private:
         T **data; //Values in the Matrix
+
+        //for eigenval stuff
+
     public:
+        //reduce matrix to upper Hessenberg form
+        //Come back in clean this up, not very memory efficient. Rework how matrix data is
+        //stored to allow for faster copying of info.
+        Matrix<T> upperHessenberg() {
+            ASSERT(n == m, "MATRIX NOT SQUARE!!!");
+            Matrix<T> carry(*this);
+            for (unsigned i = 0; i < n - 2; i++) {
+                Matrix<T> _x(n - i - 1, 1, 0);
+                Matrix<T> _w(_x);
+                Matrix<T> _v(_x);
+                for (unsigned j = i + 1; j < n; j++) {
+                    _x(j - i - 1, 0) = carry.data[j][i];
+                }
+                
+                _w(0, 0) = (_x(0, 0) > 0) ? -_x.colMag(0) : _x.colMag(0);
+                _v = _w - _x;
+                Matrix<T> _p(n - i - 1);
+                _p = (_v * _v.transpose()) * (1 / (_v.transpose() * _v)(0, 0));
+                //create reflector
+                Matrix<T> _hTemp = Matrix<T>(n - i - 1) - (_p * 2);
+                Matrix<T> _h(n);
+                for (unsigned k = i + 1; k < n; k++) {
+                    for (unsigned l = i + 1; l < n; l++) {
+                        _h(k, l) = _hTemp(k - i - 1, l - i - 1);
+                    }
+                }
+                carry = _h * (carry * _h);
+            }
+            return carry;
+        }
+
+
+        //reduce matrix to upper Schur form using QR algorithm
+        std::vector<Matrix<T>> qrDecomp() {
+            ASSERT(n == m, "MATRIX NOT SQUARE!!!");
+            Matrix<T> Q(n);
+            Matrix<T> R(n);
+            for (unsigned i = 0; i < n; i++) {
+                Matrix<T> col(n, 1, 0);
+                Matrix<T> modCol(n, 1, 0);
+                for (unsigned k = 0; k < n; k++) {
+                    col(k, 0) = this->data[k][i];
+                }
+                for (unsigned j = 0; j <= i; j++) {
+                    if (j == i) {
+                        for (unsigned k = 0; k < n; k++) {
+                            modCol(k, 0) += col(k, 0);
+                        }
+                        R(j, i) = modCol.colMag(0);
+                    }
+                    else {
+                        //come back and make a better interop between vectors and matricies
+                        T dotVal = 0;
+                        dotVal = 0;
+                        //dot prod
+                        for (unsigned k = 0; k < n; k++) {
+                            dotVal += (col(k, 0) * Q(k, j));
+                        }
+                        for (unsigned l = 0; l < n; l++) {
+                            modCol(l, 0) -= Q(l, j) * dotVal;
+                        }
+                        R(j, i) = dotVal;
+                    }
+                }
+
+                for (unsigned k = 0; k < n; k++) {
+                    Q(k, i) = modCol(k, 0) * (1. / modCol.colMag(0));
+                }
+            }
+            std::vector<Matrix<T>> ret;
+            ret.push_back(Q);
+            ret.push_back(R);
+            return ret;
+        }
+        //return eigenvalues
+
 
 
 
@@ -187,6 +266,7 @@ namespace sm {
                 data[i] = new T[m];
                 for (unsigned j = 0; j < m; j++) {
                     if (i == j) { data[i][j] = 1; }
+                    else { data[i][j] = 0; }
                 }
             }
 
@@ -238,7 +318,7 @@ namespace sm {
         const void print() const{
             for (unsigned i = 0; i < n; i++) {
                 for (unsigned j = 0; j < m; j++) {
-                    std::cout << data[i][j] << ", ";
+                    std::cout << data[i][j] << ",\t";
                 }
                 std::cout << std::endl;
             }
@@ -247,7 +327,7 @@ namespace sm {
         void print() {
             for (unsigned i = 0; i < n; i++) {
                 for (unsigned j = 0; j < m; j++) {
-                    std::cout << data[i][j] << ", ";
+                    std::cout << data[i][j] << ",\t";
                 }
                 std::cout << std::endl;
             }
@@ -255,11 +335,11 @@ namespace sm {
 
 
         Matrix<T> transpose() {
-            ASSERT(n == m, "MATRIX NOT SQUARE");
-            Matrix<T> res(n, m, 0);
+            //ASSERT(n == m, "MATRIX NOT SQUARE");
+            Matrix<T> res(m, n, 0);
             for (unsigned i = 0; i < n; i++) {
                 for (unsigned j = 0; j < m; j++) {
-                    res(i, j) = data[j][i];
+                    res(j, i) = data[i][j];
                 }
             }
             return res;
@@ -391,6 +471,20 @@ namespace sm {
             (*this) = res;
         }
 
+        T colMag(unsigned colIdx) {
+            T ret = 0;
+            for (unsigned i = 0; i < n; i++) {
+                T val = this->data[i][colIdx];
+                ret = ret + pow(val, 2);
+            }
+            return sqrt(ret);
+        }
+
+
+        //Eigen Value Calcualtion
+        Matrix<T> eigenvals() {
+
+        }
 
 
 
@@ -458,13 +552,6 @@ namespace sm {
 
         /*
         PSEUDO TODO
-        addition dun
-        subtraction dun
-        multiplication dun
-        determinant
-        multiplication dun
-        transpose dun
-        inverse dun
         adjoint
         cofactor
 
@@ -474,5 +561,48 @@ namespace sm {
 
 
     };
+
+
+    template <class T>
+    class LQR {
+    public:
+        Matrix<T> A;
+        Matrix<T> B;
+        Matrix<T> C;
+        Matrix<T> D;
+
+        //Cost Matricies For Optimal Gain Matrix K
+        Matrix<T> Q;
+        Matrix<T> R;
+
+        //Optimal Gain Matrix K
+        Matrix<T> K;
+
+        //Calculate and Populate Optimal Gain Matrix K
+        void calcK() {
+            /*
+            Pseudo Code
+            Solve continuous time algebraic Riccati equation
+            A^T * P + P * A - (P * B + N)*R^-1 * (B^T * P + N^T) + Q = 0
+            K = R^-1 * (B^T * P + N^T)
+            ---> https://www.researchgate.net/publication/2747176_Computational_Solution_of_the_Algebraic_Riccati_Equation
+            Using Hamiltonian Matrix...
+            First evaluate existance and validity of expected solution
+            find eigen values of Hamiltonian matrix
+            */
+        }
+
+
+
+    private:
+
+
+
+    protected:
+
+
+
+    };
+
 
 }
