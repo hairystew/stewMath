@@ -162,6 +162,7 @@ namespace sm {
         Matrix<T> upperHessenberg() {
             ASSERT(n == m, "MATRIX NOT SQUARE!!!");
             Matrix<T> carry(*this);
+            Matrix<T> eigvecs(n);
             for (unsigned i = 0; i < n - 2; i++) {
                 Matrix<T> _x(n - i - 1, 1, 0);
                 Matrix<T> _w(_x);
@@ -186,6 +187,8 @@ namespace sm {
             }
             return carry;
         }
+
+
 
 
         //reduce matrix to upper Schur form using QR algorithm
@@ -232,11 +235,32 @@ namespace sm {
         }
         //return eigenvalues
 
+        //uses givens rotations to make an upper triangular matrix from an upper hessenberg matrix
+        std::vector<Matrix<T>> qrDecompHessenberg() {
+            ASSERT(n == m, "MATRIX NOT SQUARE!!!");
+            Matrix<T> r(*this);
+            Matrix<T> q(this->n);
+            for (unsigned i = 0; i < n - 1; i++) {
+                Matrix<T> rot(n);
+                T rad = sqrt(pow(r(i, i), 2) + pow(r(i + 1, i), 2));
+                T c = r(i, i) / rad;
+                T s = -r(i + 1, i) / rad;
+                rot(i, i) = c;
+                rot(i + 1, i) = s;
+                rot(i, i + 1) = -s;
+                rot(i + 1, i + 1) = c;
+                r = rot * r;
+                q = q * rot.transpose();
+            }
+            std::vector<Matrix<T>> ret;
+            ret.push_back(q);
+            ret.push_back(r);
+            return ret;
+        }
 
 
-
-        int n; //Rows
-        int m; //Cols
+        unsigned n; //Rows
+        unsigned m; //Cols
 
 
         T& operator()(const unsigned& n, const unsigned& m) {
@@ -260,7 +284,7 @@ namespace sm {
         }
 
         //Initialized a square matrix to identity
-        Matrix<T>(int _n) : n(_n), m(_n) {
+        Matrix<T>(unsigned _n) : n(_n), m(_n) {
             data = new T * [n];
             for (unsigned i = 0; i < n; ++i) {
                 data[i] = new T[m];
@@ -312,7 +336,6 @@ namespace sm {
             m = rhs.m;
             return *this;
         }
-
 
 
         const void print() const{
@@ -455,10 +478,10 @@ namespace sm {
         Matrix<T> operator*(const Matrix<T>& rhs) {
             ASSERT(this->m == rhs.n, "MATRIX SIZE MISMATCH");
             Matrix<T> res(this->n, rhs.m, 0);
-            for (unsigned i = 0; i < rhs.m; i++) {
-                for (unsigned j = 0; j < this->n; j++) {
-                    for (unsigned k = 0; k < rhs.n; k++) {
-                        res(i, j) += this->data[i][k] * rhs(k, j);
+            for (unsigned i = 0; i < rhs.m; i++) {//out col
+                for (unsigned j = 0; j < this->n; j++) { // out row
+                    for (unsigned k = 0; k < rhs.n; k++) { // sum
+                        res(j, i) += this->data[j][k] * rhs(k, i);
                     }
                 }
             }
@@ -482,9 +505,29 @@ namespace sm {
 
 
         //Eigen Value Calcualtion
-        Matrix<T> eigenvals() {
-
+        static std::vector<Matrix<T>> eigen(Matrix<T> mat, unsigned n = 50) {
+            //ToDo:: use upper hessenberg and rotations to calculate both more efficiently
+            Matrix<T> temp = mat.upperHessenberg();
+            std::vector<sm::Matrix<double>> qr = temp.qrDecompHessenberg();
+            Matrix<T> eigenvecs(mat.n);
+            temp = qr[1] * qr[0];
+            for (int i = 0; i < n; i++) {
+                qr = temp.qrDecompHessenberg();
+                temp = qr[1] * qr[0];
+            }
+            for (int i = 0; i < mat.n; i++) {
+                sm::Matrix<T> tempHess = ((mat - (Matrix<T>(mat.n) * temp(i, i))).transpose()).upperHessenberg();
+                std::vector<sm::Matrix<double>> qrEig = tempHess.qrDecompHessenberg();
+                for (int j = 0; j < mat.n; j++) {
+                    eigenvecs(j, i) = qrEig[0](j, mat.n - 1);
+                }
+            }
+            std::vector<Matrix<T>> ret;
+            ret.push_back(temp);
+            ret.push_back(eigenvecs);
+            return ret;
         }
+
 
 
 
@@ -548,7 +591,15 @@ namespace sm {
 
 
 
+        static void test() {
+            Matrix<T> joe(3);
+            Matrix<T> joel(3);
+            joel(0, 0) = 4;
+            joe(0, 0) = joel(0, 0);
+            joe(0, 0) = 2;
+            joel.print();
 
+        }
 
         /*
         PSEUDO TODO
@@ -579,19 +630,39 @@ namespace sm {
         Matrix<T> K;
 
         //Calculate and Populate Optimal Gain Matrix K
-        void calcK() {
+        void calcK(Matrix<T> A, Matrix<T> B, Matrix<T> Q, Matrix<T> R) {
             /*
             Pseudo Code
-            Solve continuous time algebraic Riccati equation
-            A^T * P + P * A - (P * B + N)*R^-1 * (B^T * P + N^T) + Q = 0
-            K = R^-1 * (B^T * P + N^T)
-            ---> https://www.researchgate.net/publication/2747176_Computational_Solution_of_the_Algebraic_Riccati_Equation
-            Using Hamiltonian Matrix...
-            First evaluate existance and validity of expected solution
-            find eigen values of Hamiltonian matrix
+            Create Hamiltonian Matrix
+            Find eigenvalues and eigen vectors of hamiltonian matrix
+            calculate K
             */
-        }
 
+            //create hamiltonian
+            Matrix<T> topRight = -B * R.cdInv() * B.transpose();
+
+            Matrix<T> H(2 * A.n);
+            for (int i = 0; i < 2 * A.n - 1; i++) {
+                for (int j = 0; j < 2 * A.n - 1; j++) {
+                    if (i < A.n) {
+                        if (j < A.n) {
+                            
+                        }
+                        else {
+
+                        }
+                    }
+                    else {
+                        if (j < A.n) {
+
+                        }
+                        else {
+
+                        }
+                    }
+                }
+            }
+        }
 
 
     private:
